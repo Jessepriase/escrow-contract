@@ -4,6 +4,8 @@ use super::*;
 mod cancel_escrow_test;
 #[path = "emergency_pause_test.rs"]
 mod emergency_pause_test;
+#[path = "admin_override_cancel_tests.rs"]
+mod admin_override_cancel_tests;
 use crate::Error::NotFunded;
 use soroban_sdk::{
     contract, contractimpl, contracttype, testutils::Address as _, testutils::EnvTestConfig,
@@ -10148,4 +10150,29 @@ fn test_multisig_split_refund_illegal_source_state_fails() {
     // Escrow is funded but NOT multisig locked (illegal source state)
     let result = client.try_multisig_split_refund(&admin_addr, &1_000_i128, &5_000_u32, &5_000_u32);
     assert_eq!(result, Err(Ok(Error::InvalidStatus)));
+}
+
+// ── milestone state isolation ─────────────────────────────────────────────────
+
+/// cancel_escrow is rejected when all milestones have been released and
+/// the contract token balance is zero — there are no funds left to resolve.
+#[test]
+fn test_cancel_escrow_all_milestones_released_still_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let amounts = vec![&env, 5_000_i128];
+    let (client_addr, freelancer_addr, _, _, token_id, contract_id, escrow) =
+        setup_funded_escrow(&env, amounts);
+
+    escrow.mark_delivered(&freelancer_addr, &0u32);
+    escrow.approve_milestone(&client_addr, &0u32);
+
+    let token = token::Client::new(&env, &token_id);
+    assert_eq!(token.balance(&contract_id), 0);
+
+    // All milestones released — contract balance is zero, so cancel must
+    // return InvalidAmount rather than succeed.
+    let result = escrow.try_cancel_escrow(&client_addr);
+    assert_eq!(result, Err(Ok(Error::InvalidAmount)));
 }
